@@ -1,9 +1,7 @@
-import os
-from dotenv import load_dotenv
 from openai import OpenAI, RateLimitError, OpenAIError
+from app.core.config import OPENAI_API_KEY
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def get_llm_response(messages: list[dict]) -> str:
     try:

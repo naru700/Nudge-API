@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 
 class SessionStartRequest(BaseModel):
-    user_id: str
-    prompt: str  # system message
+    prompt: str
+
 
 class MessageRequest(BaseModel):
     session_id: str

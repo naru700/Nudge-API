@@ -2,21 +2,23 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer
 from starlette.middleware.cors import CORSMiddleware
 
-from auth import USERS, create_user, authenticate_user, create_access_token, decode_token
-from models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, UserLogin, UserOut
-from service import get_llm_response
-from sessions_store import start_new_session, get_session_messages, append_to_session
+from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user
+from app.models.models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, UserLogin, UserOut
+from app.services.service import get_llm_response
+from app.store.sessions_store import start_new_session, get_session_messages, append_to_session
+from app.core.config import CORS_ORIGINS
+from app.core.security import oauth2_scheme
 
 app = FastAPI()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
-# Allow frontend dev
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"]
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
 )
+
 
 @app.post("/register")
 def register(req: UserRegister):
@@ -48,27 +50,35 @@ async def root():
 
 
 @app.post("/start-session")
-async def start_session(req: SessionStartRequest):
-    session_id = start_new_session(req.user_id, req.prompt)
+async def start_session(
+    req: SessionStartRequest,
+    user: dict = Depends(get_current_user)
+):
+    session_id = start_new_session(user["user_id"], req.prompt)
     return {"session_id": session_id}
-
 
 @app.post("/generate", response_model=MessageResponse)
 async def generate(req: MessageRequest):
-    # 1. Get session history
     messages = get_session_messages(req.session_id)
 
-    # 2. Append new user input
+    # Sliding window: system + last 2 message pairs (4 total)
+    system_prompt = messages[:1]
+    recent_exchanges = messages[-4:]  # 2 user+assistant turns = 4 messages
+
+    context_window = system_prompt + recent_exchanges
+
     user_msg = {"role": "user", "content": req.user_message}
-    messages.append(user_msg)
+    context_window.append(user_msg)
 
-    # 3. Send full history to LLM
-    llm_reply = get_llm_response(messages)
+    print(f"OpenAI Context ({len(context_window)} msgs):")
+    for msg in context_window:
+        print(msg['role'].upper(), ":", msg['content'])
 
-    # 4. Append assistant response to history
-    assistant_msg = {"role": "assistant", "content": llm_reply}
+    llm_reply = get_llm_response(context_window)
+
     append_to_session(req.session_id, "user", req.user_message)
     append_to_session(req.session_id, "assistant", llm_reply)
 
     return {"response": llm_reply}
+
 

@@ -1,6 +1,10 @@
 import uuid
+
+from fastapi import Depends, HTTPException
 from passlib.context import CryptContext
 from jose import JWTError, jwt
+
+from app.core.security import oauth2_scheme
 
 SECRET_KEY = "secret-must-be-env"  # replace with os.getenv() for real
 ALGORITHM = "HS256"
@@ -26,3 +30,10 @@ def create_access_token(data: dict):
 
 def decode_token(token: str):
     return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = decode_token(token)
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
