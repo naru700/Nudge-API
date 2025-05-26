@@ -3,7 +3,7 @@ import uuid
 # Simple in-memory session store
 SESSIONS = {}
 
-def start_new_session(user_id: str, system_prompt: str):
+def start_new_session( system_prompt: str):
     session_id = str(uuid.uuid4())
     SESSIONS[session_id] = [{
         "role": "system",

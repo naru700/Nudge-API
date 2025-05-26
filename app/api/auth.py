@@ -3,10 +3,9 @@ import uuid
 from fastapi import Depends, HTTPException
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-
+from app.core.config import JWT_SECRET
 from app.core.security import oauth2_scheme
 
-SECRET_KEY = "secret-must-be-env"  # replace with os.getenv() for real
 ALGORITHM = "HS256"
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -25,15 +24,22 @@ def authenticate_user(email: str, password: str):
         return None
     return user
 
-def create_access_token(data: dict):
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+def decode_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload
+    except JWTError:
+        raise
 
-def decode_token(token: str):
-    return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+def create_access_token(data: dict):
+    return jwt.encode(data, JWT_SECRET, algorithm="HS256")
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        payload = decode_token(token)
-        return payload
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return {
+            "user_id": payload.get("user_id"),
+            "email": payload.get("email")
+        }
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
