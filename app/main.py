@@ -1,5 +1,4 @@
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import OAuth2PasswordBearer
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user
@@ -54,11 +53,14 @@ async def start_session(
     req: SessionStartRequest,
     user: dict = Depends(get_current_user)
 ):
-    session_id = start_new_session(user["user_id"], req.prompt)
+    session_id = start_new_session( req.prompt)
     return {"session_id": session_id}
 
 @app.post("/generate", response_model=MessageResponse)
-async def generate(req: MessageRequest):
+async def generate(
+    req: MessageRequest,
+    user: dict = Depends(get_current_user)
+):
     messages = get_session_messages(req.session_id)
 
     # Sliding window: system + last 2 message pairs (4 total)
