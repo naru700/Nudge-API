@@ -12,10 +12,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Fake in-memory DB
 USERS = {}
 
-def create_user(email: str, password: str):
+def create_user(name: str, email: str, password: str):
     user_id = str(uuid.uuid4())
     hashed_pw = pwd_context.hash(password)
-    USERS[email] = {"user_id": user_id, "email": email, "password": hashed_pw}
+    USERS[email] = {"user_id": user_id, "name": name, "email": email, "password": hashed_pw}
     return user_id
 
 def authenticate_user(email: str, password: str):

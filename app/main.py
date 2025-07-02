@@ -23,7 +23,7 @@ app.add_middleware(
 def register(req: UserRegister):
     if req.email in USERS:
         raise HTTPException(status_code=400, detail="Email already registered")
-    uid = create_user(req.email, req.password)
+    uid = create_user(req.name, req.email, req.password)
     return {"user_id": uid}
 
 @app.post("/login", response_model=TokenResponse)
