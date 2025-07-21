@@ -1,45 +1,86 @@
 import uuid
 
-from fastapi import Depends, HTTPException
-from passlib.context import CryptContext
-from jose import JWTError, jwt
+from fastapi import Depends
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt, ExpiredSignatureError
+
 from app.core.config import JWT_SECRET
 from app.core.security import oauth2_scheme
+from app.db.dynamodb import get_table
+from datetime import datetime, timedelta
+
+from fastapi import HTTPException
+from boto3.dynamodb.conditions import Key
 
 ALGORITHM = "HS256"
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
+
+# Set auto_error=True to enforce token validation
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=True)
 
 # Fake in-memory DB
 USERS = {}
 
+
 def create_user(name: str, email: str, password: str):
+    table = get_table("users")
+
+    # Check if user already exists
+    response = table.query(
+        IndexName="email-index",  # requires a GSI on `email`
+        KeyConditionExpression=Key("email").eq(email)
+    )
+
+    if response["Items"]:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
     user_id = str(uuid.uuid4())
-    hashed_pw = pwd_context.hash(password)
-    USERS[email] = {"user_id": user_id, "name": name, "email": email, "password": hashed_pw}
+    item = {"user_id": user_id, "name": name, "email": email, "password": password}
+    table.put_item(Item=item)
     return user_id
 
+
+
 def authenticate_user(email: str, password: str):
-    user = USERS.get(email)
-    if not user or not pwd_context.verify(password, user["password"]):
+    table = get_table("users")
+    resp = table.get_item(Key={"email": email})
+    user = resp.get("Item")
+
+    if not user or user.get("password") != password:
         return None
     return user
 
-def decode_token(token: str) -> dict:
+
+def decode_token(token: str):
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
         return payload
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except JWTError:
-        raise
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 
 def create_access_token(data: dict):
-    return jwt.encode(data, JWT_SECRET, algorithm="HS256")
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Token missing")
+
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return {
-            "user_id": payload.get("user_id"),
-            "email": payload.get("email")
-        }
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        email = payload.get("email")
+        if not user_id or not email:
+            raise HTTPException(status_code=401, detail="Invalid token payload")
+
+        return {"user_id": user_id, "email": email}
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
