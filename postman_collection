@@ -1,0 +1,240 @@
+{
+	"info": {
+		"_postman_id": "92182a6a-8f04-4c2e-ba24-bf69a71706a7",
+		"name": "api-collection",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+		"_exporter_id": "45257177",
+		"_collection_link": "https://k-9505873.postman.co/workspace/K's-Workspace~058b2a0c-e922-4a2f-826a-c0590b7407b8/collection/45257177-92182a6a-8f04-4c2e-ba24-bf69a71706a7?action=share&source=collection_link&creator=45257177"
+	},
+	"item": [
+		{
+			"name": "Register",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": " application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"name\": \"TestUser\",\r\n  \"email\": \"testuser@example.com\",\r\n  \"password\": \"Test@123\"\r\n}\r\n\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8000/register\n"
+			},
+			"response": []
+		},
+		{
+			"name": "Login",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"let token = pm.response.json().access_token;\r",
+							"pm.environment.set(\"access_token\", token);"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": " application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"testuser@example.com\",\r\n  \"password\": \"Test@123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8000/login\n"
+			},
+			"response": []
+		},
+		{
+			"name": "Me",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": {
+						"token": "{{access_token}}"
+					}
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": " Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"url": "http://127.0.0.1:8000/me\n"
+			},
+			"response": []
+		},
+		{
+			"name": "Start-Session",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"let session_id = pm.response.json().session_id;\r",
+							"pm.environment.set(\"session_id\", session_id);"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": {
+						"token": ""
+					}
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": " Bearer {{access_token}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": " application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"position\": \"SDE 1\",\r\n  \"llm\": \"gpt-4\",\r\n  \"prompt\": \"You are an AI assistant...\",\r\n  \"customPrompt\": \"Be concise and technical\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8000/start-session\n"
+			},
+			"response": []
+		},
+		{
+			"name": "Generate",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": " Bearer {{access_token}}",
+						"type": "text",
+						"disabled": true
+					},
+					{
+						"key": "Content-Type",
+						"value": " application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"session_id\": \"{{session_id}}\",\r\n  \"user_message\": \"tell me about you in 1 sentence?\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://127.0.0.1:8000/generate\n"
+			},
+			"response": []
+		},
+		{
+			"name": "Sessions",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": {
+						"token": "{{access_token}}"
+					}
+				},
+				"method": "GET",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "[\r\n  {\r\n    \"session_id\": \"xyz-123\",\r\n    \"user_id\": \"abc-001\",\r\n    \"position\": \"SDE\",\r\n    \"status\": \"active\",\r\n    \"question_count\": 5,\r\n    \"credits_remaining\": 45,\r\n    \"start_time\": \"2025-07-08T18:22:00\",\r\n    \"last_updated\": \"2025-07-08T18:30:00\"\r\n  }\r\n]\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://localhost:8000/sessions"
+			},
+			"response": []
+		},
+		{
+			"name": "Session-Summary",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"session_id\": \"ff66cfe9-e6a3-4c35-8d6c-0593002bfd11\",\r\n  \"position\": \"SDE\",\r\n  \"status\": \"active\",\r\n  \"question_count\": 5,\r\n  \"credits_remaining\": 45,\r\n  \"start_time\": \"2025-07-08T18:22:00\",\r\n  \"last_updated\": \"2025-07-08T18:30:00\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://localhost:8000/session-summary/ff66cfe9-e6a3-4c35-8d6c-0593002bfd11"
+			},
+			"response": []
+		},
+		{
+			"name": "EndSession",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}",
+						"type": "text"
+					}
+				],
+				"url": "http://localhost:8000/end-session/1b947cec-507b-4eac-a986-76f6cd06dce9"
+			},
+			"response": []
+		}
+	]
+}
