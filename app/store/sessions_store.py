@@ -21,7 +21,6 @@ def start_new_session(user_id: str, position: str, llm: str, prompt: str, custom
         "status": "active",
         "messages": [{"role": "system", "content": prompt}],
         "question_count": 0,
-        "credits_remaining": 50,
         "start_time": now,
         "last_updated": now
     }
@@ -65,15 +64,13 @@ def update_session_metadata(session_id: str):
     session = get_session(session_id)
 
     question_count = session.get("question_count", 0) + 1
-    credits_remaining = max(session.get("credits_remaining", 50) - 1, 0)
     last_updated = datetime.utcnow().isoformat()
 
     table.update_item(
         Key={"session_id": session_id},
-        UpdateExpression="SET question_count = :qc, credits_remaining = :cr, last_updated = :ts",
+        UpdateExpression="SET question_count = :qc, last_updated = :ts",
         ExpressionAttributeValues={
             ":qc": question_count,
-            ":cr": credits_remaining,
             ":ts": last_updated
         }
     )
@@ -98,7 +95,6 @@ def get_session_summary(session_id: str):
         "position": session["position"],
         "status": session["status"],
         "question_count": session["question_count"],
-        "credits_remaining": session["credits_remaining"],
         "start_time": session["start_time"],
         "last_updated": session["last_updated"]
     }

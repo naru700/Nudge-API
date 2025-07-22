@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user
 from app.db.dynamodb import get_table
 from app.models.models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, UserLogin, UserOut
+from app.services.credit_manager import get_user_credits, decrement_user_credits
 from app.services.service import get_llm_response
 from app.store.sessions_store import start_new_session, get_session_messages, append_to_session, list_sessions, \
     get_session_summary, end_session
@@ -40,15 +41,17 @@ def login(req: UserLogin):
 @app.get("/me", response_model=UserOut, tags=["Me"])
 def get_me(user: dict = Depends(get_current_user)):
     table = get_table("users")
-    db_user = table.get_item(Key={"email": user["email"]}).get("Item")
+    db_user = table.get_item(Key={"user_id": user["user_id"]}).get("Item")
+
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+
     return {
         "user_id": db_user["user_id"],
         "name": db_user["name"],
-        "email": db_user["email"]
+        "email": db_user["email"],
+        "credits": int(db_user.get("credits", 0))  # include if you want credits shown
     }
-
 
 @app.get("/")
 async def root():
@@ -83,8 +86,16 @@ async def generate(
     if session["user_id"] != user["user_id"]:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
-    if session.get("credits_remaining", 0) <= 0:
-        raise HTTPException(status_code=402, detail="Out of credits")
+    try:
+        decrement_user_credits(user["user_id"])
+    except HTTPException as e:
+        if e.status_code == 402:
+            return JSONResponse(
+                status_code=402,
+                content={"response": None, "error": "You're out of credits. Please top up to continue."}
+            )
+        else:
+            raise e
 
     # Use sliding window: system + last 2 turns
     messages = session.get("messages", [])
@@ -104,9 +115,10 @@ async def generate(
     append_to_session(req.session_id, "user", req.user_message)
     append_to_session(req.session_id, "assistant", llm_reply)
 
-    update_session_metadata(req.session_id)  # ⬅️ Updates count, credits, timestamp
+    update_session_metadata(req.session_id)  # Updates count, credits, timestamp
 
-    return {"response": llm_reply}
+    return {"response": llm_reply }
+
 
 @app.get("/sessions")
 def get_user_sessions(user: dict = Depends(get_current_user)):

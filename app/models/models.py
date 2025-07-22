@@ -17,6 +17,8 @@ class UserOut(BaseModel):
     user_id: str
     name: str
     email: str
+    credits: int
+
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -41,7 +43,6 @@ class SessionOut(BaseModel):
     prompt: str
     customPrompt: Optional[str] = None
     question_count: int
-    credits_remaining: int
     last_updated: datetime
 
 # ----------- Message Models -----------

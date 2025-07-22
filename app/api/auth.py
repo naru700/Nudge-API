@@ -35,7 +35,13 @@ def create_user(name: str, email: str, password: str):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = str(uuid.uuid4())
-    item = {"user_id": user_id, "name": name, "email": email, "password": password}
+    item = {
+        "user_id": user_id,
+        "name": name,
+        "email": email,
+        "password": password,
+        "credits": 50  # Start with 50 credits
+    }
     table.put_item(Item=item)
     return user_id
 
@@ -43,10 +49,16 @@ def create_user(name: str, email: str, password: str):
 
 def authenticate_user(email: str, password: str):
     table = get_table("users")
-    resp = table.get_item(Key={"email": email})
-    user = resp.get("Item")
+    response = table.query(
+        IndexName="email-index",
+        KeyConditionExpression=Key("email").eq(email)
+    )
+    items = response.get("Items", [])
+    if not items:
+        return None
 
-    if not user or user.get("password") != password:
+    user = items[0]
+    if user.get("password") != password:
         return None
     return user
 
