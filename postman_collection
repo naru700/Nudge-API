@@ -235,6 +235,37 @@
 				"url": "http://localhost:8000/end-session/1b947cec-507b-4eac-a986-76f6cd06dce9"
 			},
 			"response": []
+		},
+		{
+			"name": "Change-Password",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{access_token}}"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"old_password\": \"Test@123\",\r\n    \"new_password\": \"Test@1212\"\r\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://localhost:8000/change-password",
+				"description": "Generated from cURL: curl -X POST http://localhost:8000/change-password \\\r\n  -H \"Authorization: Bearer <your_JWT_token>\" \\\r\n  -H \"Content-Type: application/json\" \\\r\n  -d '{\r\n    \"old_password\": \"yourOldPassword123\",\r\n    \"new_password\": \"yourNewSecurePassword456\"\r\n  }'\r\n"
+			},
+			"response": []
 		}
 	]
 }

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 from boto3.dynamodb.conditions import Key
+from passlib.context import CryptContext
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
@@ -35,12 +36,15 @@ def create_user(name: str, email: str, password: str):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = str(uuid.uuid4())
+
+    hashed_password = hash_password(password)  # hash the password here
+
     item = {
         "user_id": user_id,
         "name": name,
         "email": email,
-        "password": password,
-        "credits": 50  # Start with 50 credits
+        "password": hashed_password,
+        "credits": 50
     }
     table.put_item(Item=item)
     return user_id
@@ -58,8 +62,10 @@ def authenticate_user(email: str, password: str):
         return None
 
     user = items[0]
-    if user.get("password") != password:
+    hashed_pw = user.get("password")
+    if not hashed_pw or not verify_password(password, hashed_pw):
         return None
+
     return user
 
 
@@ -96,3 +102,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Token expired")
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)

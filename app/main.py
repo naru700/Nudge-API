@@ -1,12 +1,14 @@
 from fastapi import FastAPI, HTTPException, Depends
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user
+from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user, \
+    hash_password, verify_password
 from app.db.dynamodb import get_table
-from app.models.models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, UserLogin, UserOut
-from app.services.credit_manager import get_user_credits, decrement_user_credits
+from app.models.models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, \
+    UserLogin, UserOut, ChangePasswordRequest
+from app.services.credit_manager import decrement_user_credits
 from app.services.service import get_llm_response
-from app.store.sessions_store import start_new_session, get_session_messages, append_to_session, list_sessions, \
+from app.store.sessions_store import start_new_session, append_to_session, list_sessions, \
     get_session_summary, end_session
 from app.core.config import CORS_ORIGINS
 from app.store.sessions_store import get_session, update_session_metadata
@@ -119,16 +121,15 @@ async def generate(
 
     return {"response": llm_reply }
 
-
-@app.get("/sessions")
+@app.get("/sessions", tags=["Session"])
 def get_user_sessions(user: dict = Depends(get_current_user)):
     return list_sessions(user["user_id"])
 
-@app.get("/session-summary/{session_id}")
+@app.get("/session-summary/{session_id}", tags=["Session"])
 def get_summary(session_id: str, user: dict = Depends(get_current_user)):
     return get_session_summary(session_id)
 
-@app.post("/end-session/{session_id}")
+@app.post("/end-session/{session_id}", tags=["Session"])
 def end(session_id: str, user: dict = Depends(get_current_user)):
     return end_session(session_id)
 
@@ -136,3 +137,27 @@ def end(session_id: str, user: dict = Depends(get_current_user)):
 def logout(user: dict = Depends(get_current_user)):
     # Client should delete token locally; we just acknowledge
     return JSONResponse(content={"message": "Logged out successfully"}, status_code=200)
+
+@app.post("/change-password", tags=["Auth"])
+def change_password(
+    payload: ChangePasswordRequest,
+    user: dict = Depends(get_current_user)
+):
+    table = get_table("users")
+
+    # Fetch fresh user record
+    db_user = table.get_item(Key={"user_id": user["user_id"]}).get("Item")
+
+    if not db_user or not verify_password(payload.old_password, db_user["password"]):
+        raise HTTPException(status_code=403, detail="Invalid current password")
+
+    # Update password
+    new_hashed = hash_password(payload.new_password)
+    table.update_item(
+        Key={"user_id": user["user_id"]},
+        UpdateExpression="SET #pw = :new_pw",
+        ExpressionAttributeNames={"#pw": "password"},
+        ExpressionAttributeValues={":new_pw": new_hashed}
+    )
+
+    return {"message": "Password updated successfully"}
