@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from starlette.middleware.cors import CORSMiddleware
 
+from app.api import speech
 from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user, \
     hash_password, verify_password
 from app.db.dynamodb import get_table
@@ -23,6 +24,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# Include speech router
+app.include_router(speech.router)
 
 
 @app.post("/register", tags=["Auth"])
