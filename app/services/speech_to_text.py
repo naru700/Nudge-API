@@ -5,7 +5,6 @@ Handles audio transcription with proper error handling for missing dependencies
 import os
 import shutil
 import tempfile
-import subprocess
 from typing import Optional, Dict, Any
 import logging
 

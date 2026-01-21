@@ -13,11 +13,6 @@ from app.services.speech_to_text import (
 )
 from app.api.auth import get_current_user
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s:     %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/speech", tags=["Speech"])
@@ -116,7 +111,11 @@ async def transcribe_audio(
         logger.info(f"[TRANSCRIBE] Read {len(audio_bytes)} bytes")
         
         # Extract file extension
-        file_ext = audio.filename.split(".")[-1].lower() if "." in audio.filename else "mp3"
+        if audio.filename and "." in audio.filename:
+            file_ext = audio.filename.split(".")[-1].lower()
+        else:
+            # Default to mp3 if filename is missing or has no extension
+            file_ext = "mp3"
         
         # Get STT service (lazy loaded)
         logger.info("[TRANSCRIBE] Loading STT service...")
@@ -182,26 +181,69 @@ async def transcribe_and_generate(
     """
     logger.info(f"[TRANSCRIBE-GENERATE] User {user['email']} - Session: {session_id}")
     
-    # First, transcribe the audio
-    transcription_result = await transcribe_audio(audio=audio, language=language)
+    # Validate audio file
+    allowed_types = [
+        "audio/mpeg", "audio/mp3", "audio/wav", "audio/wave", 
+        "audio/x-wav", "audio/m4a", "audio/mp4", "audio/ogg",
+        "audio/webm", "audio/flac"
+    ]
     
-    if not transcription_result["success"]:
+    if audio.content_type not in allowed_types:
         raise HTTPException(
-            status_code=500,
-            detail="Transcription failed"
+            status_code=400,
+            detail=f"Invalid audio format: {audio.content_type}. Supported: {', '.join(allowed_types)}"
         )
     
-    transcribed_text = transcription_result["text"]
-    logger.info(f"[TRANSCRIBE-GENERATE] Transcribed: {transcribed_text[:100]}...")
-    
-    # TODO: Integrate with /generate endpoint
-    # This would require importing and calling the generate logic
-    # For now, return just the transcription
-    
-    return {
-        "success": True,
-        "transcription": transcribed_text,
-        "language": transcription_result["language"],
-        "ai_response": None,  # TODO: Integrate with /generate
-        "message": "Transcription completed. AI generation integration pending."
-    }
+    try:
+        # Read audio bytes (can only read once)
+        audio_bytes = await audio.read()
+        logger.info(f"[TRANSCRIBE-GENERATE] Read {len(audio_bytes)} bytes")
+        
+        # Extract file extension
+        if audio.filename and "." in audio.filename:
+            file_ext = audio.filename.split(".")[-1].lower()
+        else:
+            file_ext = "mp3"
+        
+        # Get STT service and transcribe
+        logger.info("[TRANSCRIBE-GENERATE] Loading STT service...")
+        stt_service = get_stt_service()
+        
+        logger.info("[TRANSCRIBE-GENERATE] Starting transcription...")
+        result = stt_service.transcribe_bytes(
+            audio_bytes=audio_bytes,
+            format=file_ext,
+            language=language if language and language != "auto" else None
+        )
+        
+        transcribed_text = result["text"]
+        logger.info(f"[TRANSCRIBE-GENERATE] Transcribed: {transcribed_text[:100]}...")
+        
+        # TODO: Integrate with /generate endpoint
+        # This would require importing and calling the generate logic
+        # For now, return just the transcription
+        
+        return {
+            "success": True,
+            "transcription": transcribed_text,
+            "language": result["language"],
+            "ai_response": None,  # TODO: Integrate with /generate
+            "message": "Transcription completed. AI generation integration pending."
+        }
+        
+    except FFmpegNotFoundError as e:
+        logger.error(f"[TRANSCRIBE-GENERATE] ✗ FFmpeg Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "FFmpeg not found",
+                "message": str(e),
+                "instructions": "Please install ffmpeg to enable audio transcription"
+            }
+        )
+    except Exception as e:
+        logger.error(f"[TRANSCRIBE-GENERATE] ✗ Error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Transcription failed: {str(e)}"
+        )
