@@ -40,3 +40,8 @@ build/
 dist/
 *.egg-info/
 .eggs/
+
+# Documentation files (except README)
+*.md
+!README.md
+

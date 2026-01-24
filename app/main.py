@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import FileResponse
 
-from app.api.auth import USERS, create_user, authenticate_user, create_access_token, decode_token, get_current_user, \
+from app.api.auth import USERS, create_user, authenticate_user, create_access_token, get_current_user, \
     hash_password, verify_password
+from app.api import speech
 from app.db.dynamodb import get_table
 from app.models.models import SessionStartRequest, MessageResponse, MessageRequest, UserRegister, TokenResponse, \
     UserLogin, UserOut, ChangePasswordRequest
@@ -15,6 +17,9 @@ from app.store.sessions_store import get_session, update_session_metadata
 from fastapi.responses import JSONResponse
 
 app = FastAPI()
+
+# Include speech router for voice chat
+app.include_router(speech.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +63,10 @@ def get_me(user: dict = Depends(get_current_user)):
 @app.get("/")
 async def root():
     return {"message": "Nudge backend is running."}
+
+@app.get("/voice-chat")
+async def get_voice_chat():
+    return FileResponse("voice_chat.html")
 
 
 @app.post("/start-session", tags=["session"])
