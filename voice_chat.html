@@ -416,7 +416,7 @@
                     displayStream.removeTrack(track);
                 });
 
-                updateStatus('🔊 Capturing system audio... Transcription every 5 seconds', 'listening');
+                updateStatus('🔊 Capturing system audio... Transcription every 15 seconds', 'listening');
 
                 // Create MediaRecorder to capture audio chunks
                 mediaRecorder = new MediaRecorder(audioStream, {
@@ -437,18 +437,24 @@
                         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                         const audioBytes = await audioBlob.arrayBuffer();
 
-                        console.log(`Sending audio to server: ${audioBytes.byteLength} bytes`);
+                        // Only send if audio chunk is meaningful (more than 5KB to skip silence/empty containers)
+                        // WebM container with silence is typically 2-3KB, actual speech is usually 10KB+
+                        if (audioBytes.byteLength > 5120) {
+                            console.log(`✅ Sending audio to server: ${audioBytes.byteLength} bytes`);
 
-                        // Send to WebSocket as binary
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(audioBytes);
+                            // Send to WebSocket as binary
+                            if (ws && ws.readyState === WebSocket.OPEN) {
+                                ws.send(audioBytes);
+                            }
+                        } else {
+                            console.log(`⏭️ Skipping silent/empty audio chunk: ${audioBytes.byteLength} bytes (threshold: 5KB)`);
                         }
 
                         audioChunks = [];
                     }
                 };
 
-                // Record in chunks (send every 5 seconds for real-time transcription)
+                // Record in chunks (send every 3 seconds for VAD buffering)
                 mediaRecorder.start();
                 const chunkInterval = setInterval(() => {
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -457,7 +463,7 @@
                     } else {
                         clearInterval(chunkInterval);
                     }
-                }, 5000); // 5 second chunks
+                }, 3000); // 3 second chunks for VAD (backend accumulates until silence)
 
                 isListening = true;
                 currentMode = 'system';
