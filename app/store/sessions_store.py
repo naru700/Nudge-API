@@ -11,6 +11,8 @@ def start_new_session(user_id: str, position: str, llm: str, prompt: str, custom
     now = datetime.utcnow().isoformat()
     table = get_table("sessions")
 
+    system_content = f"{prompt}\n\n{custom_prompt}".strip() if custom_prompt and custom_prompt.strip() else prompt
+
     session_item = {
         "session_id": session_id,
         "user_id": user_id,
@@ -19,7 +21,7 @@ def start_new_session(user_id: str, position: str, llm: str, prompt: str, custom
         "prompt": prompt,
         "custom_prompt": custom_prompt,
         "status": "active",
-        "messages": [{"role": "system", "content": prompt}],
+        "messages": [{"role": "system", "content": system_content}],
         "question_count": 0,
         "start_time": now,
         "last_updated": now
@@ -61,17 +63,12 @@ def get_session(session_id: str):
 
 def update_session_metadata(session_id: str):
     table = get_table("sessions")
-    session = get_session(session_id)
-
-    question_count = session.get("question_count", 0) + 1
-    last_updated = datetime.utcnow().isoformat()
-
     table.update_item(
         Key={"session_id": session_id},
-        UpdateExpression="SET question_count = :qc, last_updated = :ts",
+        UpdateExpression="ADD question_count :one SET last_updated = :ts",
         ExpressionAttributeValues={
-            ":qc": question_count,
-            ":ts": last_updated
+            ":one": 1,
+            ":ts": datetime.utcnow().isoformat()
         }
     )
 

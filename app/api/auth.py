@@ -14,13 +14,9 @@ from boto3.dynamodb.conditions import Key
 from passlib.context import CryptContext
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Set auto_error=True to enforce token validation
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login", auto_error=True)
-
-# Fake in-memory DB
-USERS = {}
 
 
 def create_user(name: str, email: str, password: str):
@@ -44,7 +40,8 @@ def create_user(name: str, email: str, password: str):
         "name": name,
         "email": email,
         "password": hashed_password,
-        "credits": 50
+        "credits": 50,
+        "token_version": 1
     }
     table.put_item(Item=item)
     return user_id
@@ -95,6 +92,15 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         email = payload.get("email")
         if not user_id or not email:
             raise HTTPException(status_code=401, detail="Invalid token payload")
+
+        # Verify token_version so password changes immediately invalidate old tokens
+        token_version = payload.get("token_version", 1)
+        table = get_table("users")
+        db_user = table.get_item(Key={"user_id": user_id}).get("Item")
+        if db_user is None:
+            raise HTTPException(status_code=401, detail="User not found")
+        if int(db_user.get("token_version", 1)) != token_version:
+            raise HTTPException(status_code=401, detail="Token invalidated. Please log in again.")
 
         return {"user_id": user_id, "email": email}
 

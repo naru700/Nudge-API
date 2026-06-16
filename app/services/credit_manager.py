@@ -1,4 +1,5 @@
 from decimal import Decimal
+from botocore.exceptions import ClientError
 from app.db.dynamodb import get_table
 from fastapi import HTTPException
 
@@ -12,19 +13,18 @@ def get_user_credits(user_id: str) -> int:
 def decrement_user_credits(user_id: str):
     table = get_table("users")
 
-    # Fetch current credits
-    user_item = table.get_item(Key={"user_id": user_id}).get("Item")
-    if not user_item:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    current_credits = int(user_item.get("credits", 0))
-    if current_credits <= 0:
-        raise HTTPException(status_code=402, detail="Out of credits")
-
-    new_credits = current_credits - 1
-
-    table.update_item(
-        Key={"user_id": user_id},
-        UpdateExpression="SET credits = :new_credits",
-        ExpressionAttributeValues={":new_credits": Decimal(new_credits)}
-    )
+    # Atomic conditional decrement — no read-modify-write race, rejects at 0
+    try:
+        table.update_item(
+            Key={"user_id": user_id},
+            UpdateExpression="ADD credits :neg_one",
+            ConditionExpression="credits > :zero",
+            ExpressionAttributeValues={
+                ":neg_one": Decimal(-1),
+                ":zero": Decimal(0)
+            }
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=402, detail="Out of credits")
+        raise

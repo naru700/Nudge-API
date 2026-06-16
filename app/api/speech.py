@@ -3,12 +3,14 @@ import json
 import tempfile
 import time
 import asyncio
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from openai import OpenAI
 
 from app.core.config import OPENAI_API_KEY
+from app.api.auth import decode_token
 
 router = APIRouter(prefix="/speech", tags=["Speech"])
 
@@ -23,8 +25,8 @@ class AudioBuffer:
         self.buffers: Dict[str, List[bytes]] = {}  # session_id -> list of audio chunks
         self.last_audio_time: Dict[str, float] = {}  # session_id -> timestamp
         self.pending_timestamps: Dict[str, str] = {}  # session_id -> first chunk timestamp
-        self.SILENCE_THRESHOLD = 2.0  # seconds of silence before transcribing (reduced for faster response)
-        self.MIN_BUFFER_SIZE = 5120  # 5KB minimum to transcribe
+        self.SILENCE_THRESHOLD = 1.5  # seconds of silence before transcribing
+        self.MIN_BUFFER_SIZE = 1024  # 1KB minimum to avoid transcribing empty frames
 
     def add_chunk(self, session_id: str, audio_bytes: bytes, timestamp: str) -> None:
         """Add audio chunk to buffer"""
@@ -109,39 +111,33 @@ def transcribe_audio(audio_bytes: bytes) -> str:
     Returns:
         Transcribed text (empty string if only music/noise detected)
     """
+    temp_audio_path = None
     try:
-        # Save to temporary file
         with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio_path = temp_audio.name
-        # Transcribe using Whisper
+
         with open(temp_audio_path, "rb") as audio_file:
             transcript = openai_client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 language="en"
             )
-        # Clean up temp file
-        Path(temp_audio_path).unlink()
 
-        # Filter out music symbols and artifacts
         text = transcript.text.strip()
 
-        # List of patterns that indicate non-speech audio
         ignore_patterns = [
-            '♪', '♫', '🎵', '🎶',  # Music symbols
+            '♪', '♫', '🎵', '🎶',
             '[Music]', '[music]',
             '[Silence]', '[silence]',
-            'you', 'You',  # Common Whisper artifacts from silence
-            'uh', 'um', 'hmm',  # Single filler words
+            'you', 'You',
+            'uh', 'um', 'hmm',
         ]
 
-        # If transcription is only music/noise artifacts, return empty
         if text in ignore_patterns or len(text) < 3:
             print(f"Filtered out non-speech: '{text}'")
             return ""
 
-        # If transcription contains only music symbols
         if all(char in '♪♫🎵🎶 []Musicmusic' for char in text):
             print(f"Filtered out music: '{text}'")
             return ""
@@ -150,25 +146,27 @@ def transcribe_audio(audio_bytes: bytes) -> str:
     except Exception as e:
         print(f"Transcription error: {e}")
         return ""
+    finally:
+        if temp_audio_path:
+            Path(temp_audio_path).unlink(missing_ok=True)
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint for real-time audio transcription with Voice Activity Detection (VAD)
-
-    VAD Strategy:
-    - Accumulates audio chunks (sent every 2-3 seconds from client)
-    - Detects 3+ seconds of silence
-    - Transcribes complete accumulated audio as one question
-    - Handles pauses naturally
-
-    Supports both old format (text/bytes) and new format (JSON with base64)
-
-    For Angular apps:
-    - Connect: ws://localhost:8000/speech/ws
-    - Send: {"audio": "base64_string", "timestamp": "ISO_date", "session_id": "required"}
-    - Receive: {"type": "transcription", "text": "...", "timestamp": "...", "session_id": "..."}
-    """
+async def websocket_endpoint(websocket: WebSocket, token: str = Query(default=None)):
     await manager.connect(websocket)
+
+    # Validate JWT before processing any audio
+    if not token:
+        await websocket.send_json({"type": "error", "message": "Authentication required"})
+        await websocket.close(code=4001)
+        manager.disconnect(websocket)
+        return
+
+    try:
+        decode_token(token)
+    except Exception:
+        await websocket.send_json({"type": "error", "message": "Invalid or expired token"})
+        await websocket.close(code=4001)
+        manager.disconnect(websocket)
+        return
 
     session_id = None
     vad_check_task = None
@@ -188,7 +186,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     if combined_audio and is_connected:
                         print(f"🎯 VAD triggered transcription for session {session_id}")
-                        transcription = transcribe_audio(combined_audio)
+                        # Run synchronous Whisper call in a thread so it doesn't block the event loop
+                        transcription = await asyncio.to_thread(transcribe_audio, combined_audio)
 
                         if transcription and is_connected:
                             print(f"✅ Complete question transcribed: {transcription}")
@@ -210,7 +209,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
             except Exception as e:
                 print(f"VAD check error: {e}")
-                break
+                continue  # Non-fatal — keep the VAD task alive
 
     try:
         # Start VAD monitoring task
@@ -220,12 +219,17 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 message = await websocket.receive()
 
-                # Handle new JSON format with VAD buffering
+                # Starlette can return a disconnect dict instead of raising WebSocketDisconnect
+                if message.get("type") == "websocket.disconnect":
+                    print("WebSocket disconnect message received")
+                    is_connected = False
+                    break
+
+                # Handle JSON audio chunks (VAD path)
                 if "text" in message:
                     try:
                         data = json.loads(message["text"])
 
-                        # Check if it's JSON with audio field
                         if isinstance(data, dict) and "audio" in data:
                             audio_base64 = data.get("audio")
                             timestamp = data.get("timestamp")
@@ -238,20 +242,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                 }, websocket)
                                 continue
 
-                            # Decode base64 audio
                             audio_bytes = base64.b64decode(audio_base64)
 
-                            # Skip very small chunks (likely silence)
-                            if len(audio_bytes) < 2048:  # 2KB threshold
+                            if len(audio_bytes) < 512:
                                 print(f"⏭️ Skipping tiny chunk: {len(audio_bytes)} bytes")
                                 continue
 
                             print(f"📥 Audio chunk received: {len(audio_bytes)} bytes")
-
-                            # Add to buffer instead of immediate transcription
                             audio_buffer.add_chunk(session_id, audio_bytes, timestamp)
 
-                            # Send acknowledgment
                             await manager.send_json({
                                 "type": "ack",
                                 "message": "chunk_received",
@@ -259,22 +258,15 @@ async def websocket_endpoint(websocket: WebSocket):
                             }, websocket)
 
                         else:
-                            # Old format: plain text from browser speech recognition
                             print(f"Voice input received (text): {data}")
 
                     except (json.JSONDecodeError, ValueError):
-                        # Not JSON, treat as plain text (old format)
-                        data = message["text"]
-                        print(f"Voice input received (plain text): {data}")
+                        print(f"Voice input received (plain text): {message.get('text', '')}")
 
                 elif "bytes" in message:
-                    # Binary audio data (old format) - immediate transcription
                     audio_data = message["bytes"]
                     print(f"Audio data received (bytes): {len(audio_data)} bytes")
-
-                    # Immediate transcription for binary format (backward compatibility)
-                    transcription = transcribe_audio(audio_data)  # Sync call - no await
-
+                    transcription = await asyncio.to_thread(transcribe_audio, audio_data)
                     if transcription:
                         print(f"System audio transcribed: {transcription}")
                         await manager.send_text(transcription, websocket)
@@ -282,27 +274,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         print("Skipping empty/filtered transcription")
 
             except WebSocketDisconnect:
-                is_connected = False  # Signal VAD task to stop
-                manager.disconnect(websocket)
-                print("WebSocket disconnected")
+                is_connected = False
+                print("WebSocket disconnected (WebSocketDisconnect)")
                 if session_id:
                     audio_buffer.clear_session(session_id)
                 break
 
-            except Exception as e:
-                print(f"WebSocket error: {str(e)}")
-                import traceback
-                traceback.print_exc()
+            except RuntimeError as e:
+                # "Cannot call receive once a disconnect message has been received"
+                is_connected = False
+                print(f"[WS] RuntimeError on receive (client already disconnected): {e}")
+                break
 
-                # Only try to send error if still connected
-                if is_connected:
-                    try:
-                        await manager.send_json({
-                            "type": "error",
-                            "message": str(e)
-                        }, websocket)
-                    except:
-                        pass  # WebSocket already closed
+            except Exception as e:
+                print(f"WebSocket error: {e}")
+                traceback.print_exc()
+                is_connected = False
+                break
 
     finally:
         # Signal background task to stop
